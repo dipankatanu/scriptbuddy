@@ -1,6 +1,6 @@
-# ScriptBuddy
+# scriptbuddy
 
-ScriptBuddy makes any R script or analysis folder runnable on a new machine.
+scriptbuddy makes any R script or analysis folder runnable on a new machine.
 
 It scans R code, detects required packages, follows `source()` files recursively, and classifies dependencies as CRAN, Bioconductor, or GitHub. It can install only what is missing, export a dependency report, and generate a reproducible `renv.lock` file.
 
@@ -17,9 +17,9 @@ remotes::install_github("dipankatanu/scriptbuddy")
 
 ---
 
-## How ScriptBuddy works
+## How scriptbuddy works
 
-ScriptBuddy detects packages used through:
+scriptbuddy detects packages used through:
 
 - `library()` and `require()`
 - `pkg::function()` and `pkg:::function()`
@@ -106,7 +106,7 @@ This creates or updates a `renv.lock` file so the exact software environment can
 
 ---
 
-## Why ScriptBuddy exists
+## Why scriptbuddy exists
 
 Most R scripts fail on new machines because:
 
@@ -115,7 +115,7 @@ Most R scripts fail on new machines because:
 - GitHub packages are forgotten  
 - Dependencies are hidden inside `source()` files  
 
-ScriptBuddy solves these problems in one command.
+scriptbuddy solves these problems in one command.
 
 ---
 
