@@ -1,0 +1,105 @@
+source("R/scriptbuddy.R")
+
+# Create a small dummy script to test scanning
+dir.create("tmp", showWarnings = FALSE)
+writeLines(c(
+  "library(dplyr)",
+  "ggplot2::ggplot()",
+  "source('helper.R')"
+), "tmp/test.R")
+
+writeLines(c(
+  "library(Matrix)",
+  "Seurat::FindMarkers"
+), "tmp/helper.R")
+
+scan_deps("tmp/test.R")
+classify_deps(scan_deps("tmp/test.R"))
+
+
+
+install.packages("roxygen2")
+roxygen2::roxygenise()
+
+
+rm(list = c("classify_deps", "install_deps", "scan_deps", "scriptbuddy"))
+
+file.remove("NAMESPACE")
+
+roxygen2::roxygenise()
+
+
+#install.packages("devtools")
+devtools::load_all()
+scriptbuddy("tmp/test.R", install = FALSE)
+
+
+# Update DESCRIPTION Imports line safely
+desc_lines <- readLines("DESCRIPTION")
+desc_lines <- sub("^Imports: utils$", "Imports: utils, cli", desc_lines)
+writeLines(desc_lines, "DESCRIPTION")
+
+roxygen2::roxygenise()
+
+devtools::load_all()
+scriptbuddy("tmp/test.R", install = FALSE)
+
+
+write_deps_report("tmp/test.R", out_dir = "tmp/report")
+list.files("tmp/report")
+
+
+rem <- scan_remotes(path)
+writeLines(rem, file.path(out_dir, "github.txt"))
+
+
+
+writeLines(c(
+  "library(dplyr)",
+  "remotes::install_github('satijalab/seurat')"
+), "tmp/github_test.R")
+
+scan_remotes("tmp/github_test.R")
+
+
+
+write_deps_report("tmp/github_test.R", out_dir = "tmp/report_github")
+list.files("tmp/report_github")
+readLines("tmp/report_github/github.txt")
+
+
+file.edit("R/scriptbuddy.R")
+
+
+
+roxygen2::roxygenise()
+devtools::load_all()
+
+
+
+write_deps_report("tmp/github_test.R", out_dir = "tmp/report_github")
+list.files("tmp/report_github")
+readLines("tmp/report_github/github.txt")
+
+
+file.edit("R/scriptbuddy.R")
+
+
+
+roxygen2::roxygenise()
+devtools::load_all()
+
+
+devtools::load_all()
+
+
+scriptbuddy("tmp/test.R", install = FALSE)
+scan_remotes("tmp/github_test.R")
+print_install_commands("tmp/github_test.R")
+
+
+scriptbuddy("tmp/test.R", install = TRUE)
+
+
+roxygen2::roxygenise()
+devtools::load_all()

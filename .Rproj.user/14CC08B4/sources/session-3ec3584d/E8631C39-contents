@@ -1,0 +1,237 @@
+#' Scan dependencies from an R script or project folder
+#'
+#' ScriptBuddy finds packages used via `library()`, `require()`, `pkg::fun()`, and follows `source()` files recursively.
+#'
+#' @param path Path to a `.R` file or a directory containing `.R` files.
+#' @return Character vector of detected package names.
+#' @export
+scan_deps <- function(path) {
+  path <- normalizePath(path, winslash = '/', mustWork = FALSE)
+  files <- .sb_collect_files_recursive(path)
+  if (length(files) == 0) return(character())
+  pkgs <- character()
+  for (f in files) pkgs <- c(pkgs, .sb_parse_file_pkgs(f))
+  base_pkgs <- c('stats','graphics','grDevices','utils','methods','base','datasets')
+  pkgs <- setdiff(.sb_unique_clean(pkgs), base_pkgs)
+  pkgs
+}
+
+#' Classify packages as CRAN, Bioconductor, or Unknown
+#' Classify packages as CRAN, Bioconductor, or Unknown
+#'
+#' @param pkgs Character vector of package names.
+#' @param cran_repo CRAN repository URL.
+#' @return A list with elements `cran`, `bioc`, and `unknown`.
+#' @export
+classify_deps <- function(pkgs, cran_repo = "https://cloud.r-project.org") {
+  pkgs <- .sb_unique_clean(pkgs)
+  if (length(pkgs) == 0) return(list(cran = character(), bioc = character(), unknown = character()))
+
+  ap <- tryCatch(utils::available.packages(repos = cran_repo), error = function(e) NULL)
+  cran_avail <- if (!is.null(ap)) rownames(ap) else character()
+  cran <- intersect(pkgs, cran_avail)
+  remaining <- setdiff(pkgs, cran)
+
+  bioc <- character()
+  if (requireNamespace("BiocManager", quietly = TRUE) && length(remaining) > 0) {
+    # Temporarily set Bioconductor repos so BiocManager doesn't warn
+    old_repos <- getOption("repos")
+    on.exit(options(repos = old_repos), add = TRUE)
+
+    bioc_repos <- tryCatch(BiocManager::repositories(), error = function(e) NULL)
+    if (!is.null(bioc_repos)) {
+      # Keep CRAN at user-provided repo, but add Bioc repos
+      options(repos = c(CRAN = cran_repo, bioc_repos))
+    } else {
+      options(repos = c(CRAN = cran_repo))
+    }
+
+    bi <- suppressMessages(tryCatch(BiocManager::available(), error = function(e) character()))
+    bioc <- intersect(remaining, bi)
+  }
+
+  unknown <- setdiff(remaining, bioc)
+  list(cran = .sb_unique_clean(cran), bioc = .sb_unique_clean(bioc), unknown = .sb_unique_clean(unknown))
+}
+
+#' Install dependencies detected from an R script or project
+#'
+#' Installs CRAN packages from CRAN, and Bioconductor packages using BiocManager (if needed).
+#' Avoids interactive update prompts for Bioconductor installs.
+#'
+#' @param path Path to a `.R` file or a directory.
+#' @param cran_repo CRAN repository URL.
+#' @param quiet Reduce console output.
+#' @return Invisibly returns the classification list.
+#' @export
+install_deps <- function(path, cran_repo = 'https://cloud.r-project.org', quiet = FALSE) {
+  pkgs <- scan_deps(path)
+  cls <- classify_deps(pkgs, cran_repo = cran_repo)
+
+  old_repos <- getOption('repos')
+  on.exit(options(repos = old_repos), add = TRUE)
+  options(repos = c(CRAN = cran_repo))
+
+  if (length(cls$cran) > 0) {
+    utils::install.packages(cls$cran, dependencies = TRUE, quiet = quiet)
+  }
+
+  if (length(cls$bioc) > 0) {
+    if (!requireNamespace('BiocManager', quietly = TRUE)) {
+      utils::install.packages('BiocManager', quiet = quiet)
+    }
+    BiocManager::install(cls$bioc, ask = FALSE, update = FALSE, quiet = quiet)
+  }
+
+  invisible(cls)
+}
+
+#' ScriptBuddy: scan + report + optional install (one command)
+#'
+#' @param path Path to a `.R` file or a directory.
+#' @param install If TRUE, installs detected packages.
+#' @param cran_repo CRAN repository URL.
+#' @return Invisibly returns the classification list.
+#' @export
+scriptbuddy <- function(path, install = TRUE, cran_repo = 'https://cloud.r-project.org') {
+  pkgs <- scan_deps(path)
+  cls <- classify_deps(pkgs, cran_repo = cran_repo)
+
+  message('ScriptBuddy detected:')
+  message('  CRAN: ', if (length(cls$cran)) paste(cls$cran, collapse = ', ') else 'none')
+  message('  Bioconductor: ', if (length(cls$bioc)) paste(cls$bioc, collapse = ', ') else 'none')
+  if (length(cls$unknown)) message('  Unknown: ', paste(cls$unknown, collapse = ', '))
+
+  if (isTRUE(install)) {
+    install_deps(path, cran_repo = cran_repo, quiet = FALSE)
+    message('Done.')
+  }
+
+  invisible(cls)
+}
+
+# ----------------------------
+# Internal helpers (not exported)
+# ----------------------------
+.sb_unique_clean <- function(x) sort(unique(x[nzchar(x) & !is.na(x)]))
+.sb_is_string1 <- function(x) is.character(x) && length(x) == 1 && !is.na(x)
+
+.sb_read_text <- function(file) {
+  tryCatch(readLines(file, warn = FALSE, encoding = 'UTF-8'),
+           error = function(e) readLines(file, warn = FALSE))
+}
+
+.sb_extract_pkg_from_call <- function(expr) {
+  out <- character()
+  if (!is.call(expr)) return(out)
+  fn <- expr[[1]]
+
+  # library(pkg), require(pkg), requireNamespace('pkg'), loadNamespace('pkg')
+  if (is.name(fn) && as.character(fn) %in% c('library','require','requireNamespace','loadNamespace')) {
+    if (length(expr) >= 2) {
+      arg <- expr[[2]]
+      if (is.name(arg)) out <- c(out, as.character(arg))
+      if (.sb_is_string1(arg)) out <- c(out, arg)
+    }
+    return(.sb_unique_clean(out))
+  }
+
+  # pacman::p_load(pkg1, pkg2, ...)
+  if (is.call(fn) && identical(fn[[1]], as.name('::')) && length(fn) >= 3) {
+    pkg <- fn[[2]]; fun <- fn[[3]]
+    if (is.name(pkg) && is.name(fun) && as.character(pkg) == 'pacman' && as.character(fun) == 'p_load') {
+      args <- as.list(expr)[-1]
+      for (a in args) {
+        if (is.name(a)) out <- c(out, as.character(a))
+        if (.sb_is_string1(a)) out <- c(out, a)
+      }
+      return(.sb_unique_clean(out))
+    }
+  }
+
+  # pkg::fun(...) or pkg:::fun(...)
+  if (identical(fn, as.name('::')) && length(expr) >= 3) {
+    pkg <- expr[[2]]
+    if (is.name(pkg)) out <- c(out, as.character(pkg))
+    return(.sb_unique_clean(out))
+  }
+  if (identical(fn, as.name(':::')) && length(expr) >= 3) {
+    pkg <- expr[[2]]
+    if (is.name(pkg)) out <- c(out, as.character(pkg))
+    return(.sb_unique_clean(out))
+  }
+
+  .sb_unique_clean(out)
+}
+
+.sb_walk_expr <- function(expr) {
+  pkgs <- character()
+  walk <- function(x) {
+    if (is.call(x)) {
+      pkgs <<- c(pkgs, .sb_extract_pkg_from_call(x))
+      for (i in seq_along(x)) walk(x[[i]])
+    } else if (is.pairlist(x) || is.list(x)) {
+      for (i in seq_along(x)) walk(x[[i]])
+    }
+  }
+  walk(expr)
+  .sb_unique_clean(pkgs)
+}
+
+.sb_parse_file_pkgs <- function(file) {
+  file <- normalizePath(file, winslash = '/', mustWork = FALSE)
+  txt <- .sb_read_text(file)
+  if (!length(txt)) return(character())
+  exprs <- tryCatch(parse(text = txt, keep.source = FALSE), error = function(e) NULL)
+  if (is.null(exprs)) return(character())
+  pkgs <- character()
+  for (ex in as.list(exprs)) pkgs <- c(pkgs, .sb_walk_expr(ex))
+  .sb_unique_clean(pkgs)
+}
+
+.sb_find_source_files <- function(file) {
+  file <- normalizePath(file, winslash = '/', mustWork = FALSE)
+  txt <- .sb_read_text(file)
+  if (!length(txt)) return(character())
+  exprs <- tryCatch(parse(text = txt, keep.source = FALSE), error = function(e) NULL)
+  if (is.null(exprs)) return(character())
+
+  sourced <- character()
+  basedir <- dirname(file)
+
+  find_source <- function(expr) {
+    if (!is.call(expr)) return()
+    if (is.name(expr[[1]]) && as.character(expr[[1]]) == 'source' && length(expr) >= 2) {
+      arg <- expr[[2]]
+      if (.sb_is_string1(arg)) {
+        f <- normalizePath(file.path(basedir, arg), winslash = '/', mustWork = FALSE)
+        if (file.exists(f)) sourced <<- c(sourced, f)
+      }
+    }
+    for (i in seq_along(expr)) if (is.language(expr[[i]])) find_source(expr[[i]])
+  }
+
+  for (ex in as.list(exprs)) find_source(ex)
+  .sb_unique_clean(sourced)
+}
+
+.sb_collect_files_recursive <- function(path) {
+  path <- normalizePath(path, winslash = '/', mustWork = FALSE)
+  files <- if (dir.exists(path)) {
+    list.files(path, pattern = '\\.[Rr]$', recursive = TRUE, full.names = TRUE)
+  } else {
+    path
+  }
+
+  seen <- character()
+  queue <- .sb_unique_clean(files[file.exists(files)])
+
+  while (length(queue)) {
+    f <- queue[[1]]; queue <- queue[-1]
+    if (f %in% seen) next
+    seen <- c(seen, f)
+    queue <- .sb_unique_clean(c(queue, .sb_find_source_files(f)))
+  }
+
+  seen[file.exists(seen)]
+}

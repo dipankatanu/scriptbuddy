@@ -1,0 +1,12 @@
+Package: scriptbuddy
+Type: Package
+Title: One-click dependency detector and installer for R scripts
+Version: 1.0.0.0
+Authors@R: c(person("Dipanka", "Tanu", role = c("aut", "cre"), email = "dipankatanusarmah@gmail.com"))
+Description: ScriptBuddy scans R scripts or project folders to detect required packages,
+    classifies them as CRAN or Bioconductor, and installs them with minimal prompts.
+License: MIT + file LICENSE
+Encoding: UTF-8
+Roxygen: list(markdown = TRUE)
+RoxygenNote: 7.3.3
+Imports: utils, cli
