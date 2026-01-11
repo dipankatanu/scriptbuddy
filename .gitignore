@@ -1,4 +1,7 @@
-﻿tmp/
+﻿.Rproj.user/
 .Rhistory
 .RData
-.Rproj.user/
+.Ruserdata
+.Rprofile
+tmp/
+scriptbuddy_report/
