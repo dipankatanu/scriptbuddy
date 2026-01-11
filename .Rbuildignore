@@ -1,4 +1,8 @@
+^tmp$
+^scriptbuddy_report$
 ^renv$
 ^renv\.lock$
-^.*\.Rproj$
 ^\.Rproj\.user$
+^.*\.Rproj$
+^\.Rhistory$
+^\.Rprofile$
